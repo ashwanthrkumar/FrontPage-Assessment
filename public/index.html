@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hacker News Stories</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            line-height: 1.6;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        a {
+            color: #007acc;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .story {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Hacker News Stories</h1>
+    <div id="stories">Loading stories...</div>
+    <script>
+        const ws = new WebSocket('ws://localhost:8080');
+
+        // Handle incoming WebSocket messages
+        ws.onmessage = function (event) {
+            const data = JSON.parse(event.data);
+
+            // Clear loading message on initial load
+            if (document.getElementById('stories').textContent === 'Loading stories...') {
+                document.getElementById('stories').textContent = '';
+            }
+
+            if (data.type === 'initial') {
+                data.stories.forEach(story => {
+                    addStoryToDom(story);
+                });
+            } else if (data.type === 'new') {
+                addStoryToDom(data.story);
+            }
+        };
+
+        // Add a story to the DOM
+        function addStoryToDom(story) {
+            const storyDiv = document.createElement('div');
+            storyDiv.className = 'story';
+            storyDiv.innerHTML = `<a href="${story.url}" target="_blank">${story.title}</a>`;
+            document.getElementById('stories').appendChild(storyDiv);
+        }
+
+        // Handle WebSocket errors
+        ws.onerror = function (error) {
+            console.error('WebSocket error:', error);
+        };
+
+        // Handle WebSocket closure
+        ws.onclose = function () {
+            console.log('WebSocket connection closed');
+        };
+    </script>
+</body>
+
+</html>
