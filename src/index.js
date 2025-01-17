@@ -30,9 +30,13 @@ app.use(express.static(path.join(__dirname, '../public')));
 const wss = new WebSocket.Server({ port: 8080 });
 
 // Track sent stories per client
-wss.on('connection', (ws) => {
+wss.on('connection', async (ws) => {
     console.log('New client connected');
     ws.sentStories = new Set();
+
+    // Send the count of stories published in the last 5 minutes
+    const recentCount = await getRecentStoryCount();
+    ws.send(JSON.stringify({ type: 'info', recentCount }));
 
     // Send initial stories
     sendRecentStories(ws);
@@ -40,6 +44,19 @@ wss.on('connection', (ws) => {
     ws.on('close', () => console.log('Client disconnected'));
     ws.on('error', (err) => console.error('WebSocket error:', err));
 });
+
+// Fetch the count of stories published in the last 5 minutes
+const getRecentStoryCount = async () => {
+    try {
+        const [result] = await db.promise().query(
+            'SELECT COUNT(*) AS count FROM stories WHERE created_at > NOW() - INTERVAL 5 MINUTE'
+        );
+        return result[0].count;
+    } catch (err) {
+        console.error('Error fetching recent story count:', err);
+        return 0;
+    }
+};
 
 // Fetch and send recent stories to a specific client
 const sendRecentStories = async (ws) => {
@@ -88,8 +105,8 @@ const broadcastStories = async () => {
     }
 };
 
-// Periodically scrape and broadcast stories
-setInterval(broadcastStories, 60000); // Scrape and broadcast every minute
+// Periodically scrape and broadcast stories every 5 minutes (300,000 ms)
+setInterval(broadcastStories, 300000); // 5-minute interval
 
 // Start the Express server
 app.listen(3000, () => {
