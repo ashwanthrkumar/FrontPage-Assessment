@@ -2,7 +2,7 @@ const WebSocket = require('ws');
 const mysql = require('mysql2');
 const express = require('express');
 const path = require('path');
-const { scrapeStories } = require('./scraper'); // Import scraper function
+const { scrapeStories } = require('./scraper');
 
 // Create MySQL connection
 const db = mysql.createConnection({
@@ -29,47 +29,58 @@ app.use(express.static(path.join(__dirname, '../public')));
 // WebSocket server
 const wss = new WebSocket.Server({ port: 8080 });
 
-// Helper function to insert stories into MySQL
-const insertStoriesIntoDb = async (stories) => {
-    for (const story of stories) {
-        const { id, title, url } = story;
-        const query = `
-            INSERT IGNORE INTO stories (id, title, url)
-            VALUES (?, ?, ?)
-        `;
+// Track sent stories per client
+wss.on('connection', (ws) => {
+    console.log('New client connected');
+    ws.sentStories = new Set();
 
-        // Execute query to insert story
-        db.execute(query, [id, title, url], (err) => {
-            if (err) {
-                console.error(`Error inserting story with ID ${id} into DB:`, err);
-            }
-        });
-    }
-};
+    // Send initial stories
+    sendRecentStories(ws);
 
-// Broadcast stories to a WebSocket client
-const sendStoriesToClient = (ws, stories) => {
-    const payload = {
-        type: 'initial', // Message type for initial stories
-        stories,
-    };
-    ws.send(JSON.stringify(payload), (err) => {
-        if (err) {
-            console.error('Error sending stories to client:', err);
+    ws.on('close', () => console.log('Client disconnected'));
+    ws.on('error', (err) => console.error('WebSocket error:', err));
+});
+
+// Fetch and send recent stories to a specific client
+const sendRecentStories = async (ws) => {
+    try {
+        const [recentStories] = await db.promise().query(
+            'SELECT * FROM stories WHERE created_at > NOW() - INTERVAL 5 MINUTE'
+        );
+        if (recentStories.length > 0) {
+            ws.send(JSON.stringify({ type: 'initial', stories: recentStories }));
+            recentStories.forEach((story) => ws.sentStories.add(story.id));
         }
-    });
+    } catch (err) {
+        console.error('Error sending recent stories:', err);
+    }
 };
 
 // Scrape, save, and broadcast stories
 const broadcastStories = async () => {
     try {
-        const stories = await scrapeStories(); // Scrape stories
-        await insertStoriesIntoDb(stories);   // Save stories to the database
+        const stories = await scrapeStories();
 
-        // Broadcast stories to all connected clients
+        for (const story of stories) {
+            await db.promise().execute(
+                'INSERT IGNORE INTO stories (id, title, url) VALUES (?, ?, ?)',
+                [story.id, story.title, story.url]
+            );
+        }
+
+        const newStories = stories.filter((story) => {
+            // Check if this story is new for all clients
+            return [...wss.clients].every(
+                (client) => !client.sentStories.has(story.id)
+            );
+        });
+
         wss.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                sendStoriesToClient(client, stories);
+            if (client.readyState === WebSocket.OPEN && newStories.length > 0) {
+                client.send(
+                    JSON.stringify({ type: 'new', stories: newStories })
+                );
+                newStories.forEach((story) => client.sentStories.add(story.id));
             }
         });
     } catch (error) {
@@ -79,33 +90,6 @@ const broadcastStories = async () => {
 
 // Periodically scrape and broadcast stories
 setInterval(broadcastStories, 60000); // Scrape and broadcast every minute
-
-// Handle WebSocket connections
-wss.on('connection', (ws) => {
-    console.log('New client connected');
-
-    // Send initial stories immediately upon connection
-    scrapeStories()
-        .then((stories) => {
-            sendStoriesToClient(ws, stories); // Send initial stories
-            insertStoriesIntoDb(stories);     // Save to DB
-        })
-        .catch((err) => console.error('Error fetching initial stories:', err));
-
-    ws.on('message', (message) => {
-        console.log('Received message from client:', message);
-    });
-
-    ws.on('close', () => {
-        console.log('Client disconnected');
-    });
-
-    ws.on('error', (err) => {
-        console.error('WebSocket error:', err);
-    });
-});
-
-console.log('WebSocket server started on ws://localhost:8080');
 
 // Start the Express server
 app.listen(3000, () => {

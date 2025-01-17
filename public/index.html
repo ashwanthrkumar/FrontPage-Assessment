@@ -37,41 +37,22 @@
     <script>
         const ws = new WebSocket('ws://localhost:8080');
 
-        // Handle incoming WebSocket messages
-        ws.onmessage = function (event) {
+        ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
 
-            // Clear loading message on initial load
-            if (document.getElementById('stories').textContent === 'Loading stories...') {
-                document.getElementById('stories').textContent = '';
-            }
-
-            if (data.type === 'initial') {
-                data.stories.forEach(story => {
-                    addStoryToDom(story);
-                });
-            } else if (data.type === 'new') {
-                addStoryToDom(data.story);
+            if (data.type === 'initial' || data.type === 'new') {
+                data.stories.forEach(addStoryToDom);
             }
         };
 
-        // Add a story to the DOM
         function addStoryToDom(story) {
+            if (document.querySelector(`a[href="${story.url}"]`)) return;
+
             const storyDiv = document.createElement('div');
             storyDiv.className = 'story';
             storyDiv.innerHTML = `<a href="${story.url}" target="_blank">${story.title}</a>`;
             document.getElementById('stories').appendChild(storyDiv);
         }
-
-        // Handle WebSocket errors
-        ws.onerror = function (error) {
-            console.error('WebSocket error:', error);
-        };
-
-        // Handle WebSocket closure
-        ws.onclose = function () {
-            console.log('WebSocket connection closed');
-        };
     </script>
 </body>
 
